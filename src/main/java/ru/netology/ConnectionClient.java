@@ -4,30 +4,30 @@ import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
 
-public class ConnectionClient implements Runnable {
-    private ServerSocket serverSocket;
+public class ConnectionClient {
 
-    public ConnectionClient(ServerSocket serverSocket) {
-        this.serverSocket = serverSocket;
-        run();
+    private Socket socket;
+
+    public ConnectionClient(Socket socket) {
+        this.socket = socket;
     }
 
-    @Override
+
     public void run() {
         final var validPaths = List.of("/index.html", "/spring.svg", "/spring.png",
                 "/resources.html", "/styles.css", "/app.js", "/links.html", "/forms.html",
                 "/classic.html", "/events.html", "/events.js");
         try (
-                final var socket = serverSocket.accept();
                 final var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 final var out = new BufferedOutputStream(socket.getOutputStream());
         ) {
+            System.out.println(Thread.currentThread().getName());
             // read only request line for simplicity
             // must be in form GET /path HTTP/1.1
             final var requestLine = in.readLine();
@@ -35,24 +35,23 @@ public class ConnectionClient implements Runnable {
             System.out.println(requestLine);
 
             if (parts.length != 3) {
-                throw new NullPointerException();
+                returnCode404(out);
+                return;
             }
 
             final var path = parts[1];
             if (!validPaths.contains(path)) {
                 returnCode404(out);
-                throw new NullPointerException();
+                return;
             }
 
-            final var filePath = Path.of(".", "public", path);
-            final var mimeType = Files.probeContentType(filePath);
             returnPage(path, out);
-        } catch (NullPointerException e){
-            throw new NullPointerException();
-        }catch (IOException e){
+        } catch (IOException e) {
             e.printStackTrace();
         }
     }
+
+
 
     private void returnCode404(BufferedOutputStream out) throws IOException {
         out.write((
@@ -77,7 +76,6 @@ public class ConnectionClient implements Runnable {
 
     private void returnPage(String path, BufferedOutputStream out) throws IOException {
         final var filePath = Path.of(".", "public", path);
-
         // special case for classic
         if (path.equals("/classic.html")) {
             final var template = Files.readString(filePath);
