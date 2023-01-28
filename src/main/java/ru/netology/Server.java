@@ -1,5 +1,8 @@
 package ru.netology;
 
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.utils.URLEncodedUtils;
+
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,6 +22,7 @@ class Server {
         } catch (IOException e) {
             e.printStackTrace();
         }
+        URLEncodedUtils urlEncodedUtils = new URLEncodedUtils();
 
     }
 

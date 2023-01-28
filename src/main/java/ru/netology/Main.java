@@ -21,7 +21,7 @@ public class Main {
         final var filePath = Path.of(".", "public", path);
         final var length = Files.size(filePath);
         final var mimeType = Files.probeContentType(filePath);
-        new ResponseCodeSender().returnCode200(responseStream,filePath, length);
+        new ResponseCodeSender().sendCode200(responseStream,filePath, length);
         Files.copy(filePath, responseStream);
         responseStream.flush();
       }
