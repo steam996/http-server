@@ -1,21 +1,26 @@
 package ru.netology;
 
-import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import ru.netology.handlers.ResponseCodeSender;
+
+import java.io.*;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ConnectionClient {
 
-    private Socket socket;
+    private final Socket socket;
+    private final ConcurrentHashMap<String,
+            ConcurrentHashMap<String, Handler>> handlers;
+    private final ResponseCodeSender sender = new ResponseCodeSender();
 
-    public ConnectionClient(Socket socket) {
+    public ConnectionClient(Socket socket, ConcurrentHashMap<String,
+            ConcurrentHashMap<String, Handler>> handlers) {
         this.socket = socket;
+        this.handlers = handlers;
     }
 
 
@@ -24,74 +29,38 @@ public class ConnectionClient {
                 "/resources.html", "/styles.css", "/app.js", "/links.html", "/forms.html",
                 "/classic.html", "/events.html", "/events.js");
         try (
-                final var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                final var out = new BufferedOutputStream(socket.getOutputStream());
+
+//                final var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                final var in = new BufferedInputStream(socket.getInputStream());
+                final var out = new BufferedOutputStream(socket.getOutputStream())
         ) {
-            System.out.println(Thread.currentThread().getName());
-            // read only request line for simplicity
-            // must be in form GET /path HTTP/1.1
-            final var requestLine = in.readLine();
-            final var parts = requestLine.split(" ");
-            System.out.println(requestLine);
-
-            if (parts.length != 3) {
-                returnCode404(out);
+//
+            var request = Request.parse(in, out, sender);
+            if (request == null) {
+                sender.sendCode404(out);
                 return;
             }
 
-            final var path = parts[1];
-            if (!validPaths.contains(path)) {
-                returnCode404(out);
+            if (!handlers.containsKey(request.getMethod())) {
+                sender.sendCode404(out);
                 return;
             }
+            var pathHandlers = handlers.get(request.getMethod());
+            if (!pathHandlers.containsKey(request.getPath())) {
+                sender.sendCode404(out);
+                return;
+            }
+            var handler = pathHandlers.get(request.getPath());
+            try {
+                handler.handle(request, out);
+            } catch (Exception e) {
+                sender.sendCode500(out);
+                System.out.println(e.getMessage());
+            }
 
-            returnPage(path, out);
         } catch (IOException e) {
             e.printStackTrace();
-        }
-    }
 
-
-
-    private void returnCode404(BufferedOutputStream out) throws IOException {
-        out.write((
-                "HTTP/1.1 404 Not Found\r\n" +
-                        "Content-Length: 0\r\n" +
-                        "Connection: close\r\n" +
-                        "\r\n"
-        ).getBytes());
-        out.flush();
-    }
-
-    private void returnCode200(BufferedOutputStream out, Path filePath, long length) throws IOException {
-        final var mimeType = Files.probeContentType(filePath);
-        out.write((
-                "HTTP/1.1 200 OK\r\n" +
-                        "Content-Type: " + mimeType + "\r\n" +
-                        "Content-Length: " + length + "\r\n" +
-                        "Connection: close\r\n" +
-                        "\r\n"
-        ).getBytes());
-    }
-
-    private void returnPage(String path, BufferedOutputStream out) throws IOException {
-        final var filePath = Path.of(".", "public", path);
-        // special case for classic
-        if (path.equals("/classic.html")) {
-            final var template = Files.readString(filePath);
-            final var content = template.replace(
-                    "{time}",
-                    LocalDateTime.now().toString()
-            ).getBytes();
-
-            returnCode200(out, filePath, content.length);
-            out.write(content);
-            out.flush();
-        } else {
-            final var length = Files.size(filePath);
-            returnCode200(out, filePath, length);
-            Files.copy(filePath, out);
-            out.flush();
         }
     }
 }
