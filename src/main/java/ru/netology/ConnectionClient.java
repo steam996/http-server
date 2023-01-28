@@ -1,5 +1,8 @@
 package ru.netology;
 
+import ru.netology.handlers.RequestCollector;
+import ru.netology.handlers.ResponseCodeSender;
+
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -9,13 +12,20 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ConnectionClient {
 
-    private Socket socket;
+    private final Socket socket;
+    private final ConcurrentHashMap<String,
+            ConcurrentHashMap<String, Handler>> handlers;
+    private ResponseCodeSender sender = new ResponseCodeSender();
+    private RequestCollector requestHandler = new RequestCollector();
 
-    public ConnectionClient(Socket socket) {
+    public ConnectionClient(Socket socket, ConcurrentHashMap<String,
+            ConcurrentHashMap<String, Handler>> handlers) {
         this.socket = socket;
+        this.handlers = handlers;
     }
 
 
@@ -31,47 +41,32 @@ public class ConnectionClient {
             // read only request line for simplicity
             // must be in form GET /path HTTP/1.1
             final var requestLine = in.readLine();
-            final var parts = requestLine.split(" ");
-            System.out.println(requestLine);
+            Request request = requestHandler.handle(requestLine, out, sender);
 
-            if (parts.length != 3) {
-                returnCode404(out);
+            if (!handlers.containsKey(request.getMethod())){
+                sender.returnCode404(out);
                 return;
             }
+            var pathHeandlers = handlers.get(request.getMethod());
+            if (!pathHeandlers.containsKey(request.getPath())){
+                sender.returnCode404(out);
+                return;
+            }
+            pathHeandlers.get(request.getPath()).handle(request, out);
 
-            final var path = parts[1];
+            final var path = request.getPath();
+
             if (!validPaths.contains(path)) {
-                returnCode404(out);
+                sender.returnCode404(out);
                 return;
             }
 
             returnPage(path, out);
         } catch (IOException e) {
             e.printStackTrace();
+        } catch (NullPointerException e){
+            return;
         }
-    }
-
-
-
-    private void returnCode404(BufferedOutputStream out) throws IOException {
-        out.write((
-                "HTTP/1.1 404 Not Found\r\n" +
-                        "Content-Length: 0\r\n" +
-                        "Connection: close\r\n" +
-                        "\r\n"
-        ).getBytes());
-        out.flush();
-    }
-
-    private void returnCode200(BufferedOutputStream out, Path filePath, long length) throws IOException {
-        final var mimeType = Files.probeContentType(filePath);
-        out.write((
-                "HTTP/1.1 200 OK\r\n" +
-                        "Content-Type: " + mimeType + "\r\n" +
-                        "Content-Length: " + length + "\r\n" +
-                        "Connection: close\r\n" +
-                        "\r\n"
-        ).getBytes());
     }
 
     private void returnPage(String path, BufferedOutputStream out) throws IOException {
@@ -84,12 +79,12 @@ public class ConnectionClient {
                     LocalDateTime.now().toString()
             ).getBytes();
 
-            returnCode200(out, filePath, content.length);
+            sender.returnCode200(out, filePath, content.length);
             out.write(content);
             out.flush();
         } else {
             final var length = Files.size(filePath);
-            returnCode200(out, filePath, length);
+            sender.returnCode200(out, filePath, length);
             Files.copy(filePath, out);
             out.flush();
         }
